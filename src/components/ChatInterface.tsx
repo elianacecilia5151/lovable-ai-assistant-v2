@@ -12,9 +12,11 @@ interface Message {
   type: 'question' | 'answer';
   content: string;
   timestamp: Date;
-  confidence?: 'high' | 'medium' | 'low';
+  trustLevel?: 'high' | 'medium' | 'low';
   rating?: 'good' | 'bad' | null;
   source?: string;
+  positiveRatings?: number;
+  negativeRatings?: number;
 }
 
 interface ChatInterfaceProps {
@@ -34,8 +36,10 @@ const ChatInterface = ({ userType }: ChatInterfaceProps) => {
       type: 'answer',
       content: 'O protocolo para administração endovenosa segue as diretrizes da ANVISA e inclui: 1) Verificação da prescrição médica, 2) Higienização das mãos, 3) Preparação do medicamento em ambiente estéril, 4) Identificação do paciente, 5) Verificação da via de acesso venoso, 6) Administração lenta conforme prescrição, 7) Monitoramento de reações adversas.',
       timestamp: new Date(Date.now() - 290000),
-      confidence: 'high',
+      trustLevel: 'high',
       source: 'Manual de Procedimentos GSK - Seção 4.2.1',
+      positiveRatings: 15,
+      negativeRatings: 2,
     }
   ]);
   
@@ -47,22 +51,32 @@ const ChatInterface = ({ userType }: ChatInterfaceProps) => {
     'Procedimentos de emergência'
   ]);
 
-  const getConfidenceColor = (confidence?: 'high' | 'medium' | 'low') => {
-    switch (confidence) {
-      case 'high': return 'bg-green-100 text-green-800 border-green-200';
-      case 'medium': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-      case 'low': return 'bg-red-100 text-red-800 border-red-200';
-      default: return 'bg-gray-100 text-gray-800 border-gray-200';
+  const getTrustLevelColor = (trustLevel?: 'high' | 'medium' | 'low') => {
+    switch (trustLevel) {
+      case 'high': return 'bg-green-500';
+      case 'medium': return 'bg-yellow-500';
+      case 'low': return 'bg-red-500';
+      default: return 'bg-gray-400';
     }
   };
 
-  const getConfidenceText = (confidence?: 'high' | 'medium' | 'low') => {
-    switch (confidence) {
+  const getTrustLevelText = (trustLevel?: 'high' | 'medium' | 'low') => {
+    switch (trustLevel) {
       case 'high': return 'Alta Confiança';
       case 'medium': return 'Média Confiança';
       case 'low': return 'Baixa Confiança';
       default: return 'Sem Avaliação';
     }
+  };
+
+  const getTrustLevelFromRatings = (positive: number = 0, negative: number = 0): 'high' | 'medium' | 'low' => {
+    const total = positive + negative;
+    if (total === 0) return 'medium';
+    
+    const positiveRatio = positive / total;
+    if (positiveRatio >= 0.8) return 'high';
+    if (positiveRatio >= 0.5) return 'medium';
+    return 'low';
   };
 
   const handleSendMessage = () => {
@@ -78,13 +92,20 @@ const ChatInterface = ({ userType }: ChatInterfaceProps) => {
       timestamp: new Date(),
     };
 
+    // Simular diferentes níveis de confiança baseado em ratings simulados
+    const randomPositive = Math.floor(Math.random() * 20) + 1;
+    const randomNegative = Math.floor(Math.random() * 10);
+    const trustLevel = getTrustLevelFromRatings(randomPositive, randomNegative);
+
     const newAnswer: Message = {
       id: answerId,
       type: 'answer',
       content: 'Esta é uma resposta simulada do assistente IA. O sistema está processando sua pergunta e fornecendo uma resposta baseada na base de conhecimento da GSK.',
       timestamp: new Date(),
-      confidence: 'medium',
+      trustLevel,
       source: 'Base de Conhecimento GSK',
+      positiveRatings: randomPositive,
+      negativeRatings: randomNegative,
     };
 
     setMessages(prev => [...prev, newQuestion, newAnswer]);
@@ -97,9 +118,28 @@ const ChatInterface = ({ userType }: ChatInterfaceProps) => {
   };
 
   const handleRating = (messageId: string, rating: 'good' | 'bad') => {
-    setMessages(prev => prev.map(msg => 
-      msg.id === messageId ? { ...msg, rating } : msg
-    ));
+    setMessages(prev => prev.map(msg => {
+      if (msg.id === messageId) {
+        const updatedMsg = { ...msg, rating };
+        
+        // Atualizar contadores de rating
+        if (rating === 'good') {
+          updatedMsg.positiveRatings = (msg.positiveRatings || 0) + 1;
+        } else {
+          updatedMsg.negativeRatings = (msg.negativeRatings || 0) + 1;
+        }
+        
+        // Recalcular nível de confiança
+        updatedMsg.trustLevel = getTrustLevelFromRatings(
+          updatedMsg.positiveRatings, 
+          updatedMsg.negativeRatings
+        );
+        
+        return updatedMsg;
+      }
+      return msg;
+    }));
+    
     toast.success(`Avaliação registrada: ${rating === 'good' ? 'Positiva' : 'Negativa'}`);
   };
 
@@ -173,9 +213,19 @@ const ChatInterface = ({ userType }: ChatInterfaceProps) => {
                         />
                         <span className="text-sm font-medium text-gray-700">Assistente IA</span>
                       </div>
-                      <Badge className={`text-xs ${getConfidenceColor(message.confidence)}`}>
-                        {getConfidenceText(message.confidence)}
-                      </Badge>
+                      
+                      {/* Farol de Confiança */}
+                      <div className="flex items-center space-x-2">
+                        <div className={`w-3 h-3 rounded-full ${getTrustLevelColor(message.trustLevel)}`}></div>
+                        <span className="text-xs text-gray-600">
+                          {getTrustLevelText(message.trustLevel)}
+                        </span>
+                        {(message.positiveRatings || message.negativeRatings) && (
+                          <span className="text-xs text-gray-500">
+                            ({message.positiveRatings || 0}👍 / {message.negativeRatings || 0}👎)
+                          </span>
+                        )}
+                      </div>
                     </div>
                     
                     <p className="text-gray-800 leading-relaxed mb-4">{message.content}</p>
@@ -197,14 +247,6 @@ const ChatInterface = ({ userType }: ChatInterfaceProps) => {
                         >
                           <Copy className="w-3 h-3 mr-1" />
                           Copiar
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-8 px-3 text-xs"
-                        >
-                          <span className="text-xs mr-1">?</span>
-                          Fonte
                         </Button>
                       </div>
                       
